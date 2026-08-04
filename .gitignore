@@ -5,3 +5,7 @@ coverage/
 .DS_Store
 *.log
 .env*
+
+# Runtime patient data — generated report records and uploaded medical
+# documents. Must never be committed.
+data/

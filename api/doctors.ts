@@ -1,6 +1,17 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { GoogleGenAI } from "@google/genai";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Utility to wrap any Promise/Thenable with a timeout safely
+function withTimeout<T>(promise: Promise<T> | any, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Timeout")), timeoutMs);
+    Promise.resolve(promise)
+      .then((res: any) => { clearTimeout(timer); resolve(res); })
+      .catch((err: any) => { clearTimeout(timer); reject(err); });
+  });
+}
 
 function cleanJSONString(str: string): string {
   let cleaned = str.trim();
@@ -11,63 +22,59 @@ function cleanJSONString(str: string): string {
   return cleaned.trim();
 }
 
-async function generateContentWithRetry(params: any, maxRetries = 3): Promise<any> {
-  const apiKey = process.env.NVIDIA_API_KEY;
-  if (!apiKey) throw new Error("NVIDIA_API_KEY environment variable is required.");
+// Per-request cap. The previous NVIDIA implementation had no timeout, so a
+// stalled connection hung the whole request indefinitely.
+const GEMINI_TIMEOUT_MS = 60000;
 
-  const messages: any[] = [];
-  const systemInstruction = params.config?.systemInstruction || params.systemInstruction;
-  if (systemInstruction) messages.push({ role: "system", content: systemInstruction });
+let geminiClient: GoogleGenAI | null = null;
+function getGeminiClient() {
+  if (geminiClient) return geminiClient;
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY environment variable is required.");
+  geminiClient = new GoogleGenAI({ apiKey });
+  return geminiClient;
+}
 
-  const textParts: string[] = [];
-  for (const content of params.contents || []) {
-    if (typeof content === "string") { textParts.push(content); continue; }
-    const parts = content.parts || (content.text ? [content] : []);
-    for (const part of parts) {
-      if (part.text) textParts.push(part.text);
-    }
-  }
+// `params` is already Gemini-native ({ model, contents, config }), so contents
+// and config pass straight through to the SDK.
+async function generateContentWithRetry(params: any, maxRetries = 2): Promise<any> {
+  const ai = getGeminiClient();
 
-  const promptText = textParts.join("\n");
-  const modelsToTry = [
-    "meta/llama-3.3-70b-instruct",
-    "nvidia/llama-3.1-nemotron-70b-instruct",
-    "meta/llama-3.1-8b-instruct",
-  ];
+  // Caller's model first, then a stable fallback if it is unavailable/overloaded.
+  const requestedModel = params.model || "gemini-3.5-flash";
+  const modelsToTry = [requestedModel, "gemini-2.5-flash"].filter(
+    (m, i, arr) => arr.indexOf(m) === i
+  );
 
   for (const currentModel of modelsToTry) {
     let attempt = 0;
     while (attempt <= maxRetries) {
       try {
-        console.log(`[NVIDIA API] Model: ${currentModel} (Attempt ${attempt + 1})`);
-        const payload: any = {
-          model: currentModel,
-          messages: [
-            ...(systemInstruction ? [{ role: "system", content: systemInstruction }] : []),
-            { role: "user", content: promptText },
-          ],
-          temperature: 0.1,
-          max_tokens: 4096,
-        };
+        console.log(`[Gemini] Model: ${currentModel} (Attempt ${attempt + 1})`);
+
+        // withTimeout guarantees this settles even if the network stalls.
+        const response: any = await withTimeout(
+          ai.models.generateContent({
+            model: currentModel,
+            contents: params.contents,
+            config: {
+              temperature: 0.1,
+              ...(params.config || {}),
+            },
+          }),
+          GEMINI_TIMEOUT_MS
+        );
+
+        let assistantMessage = response?.text || "";
+        if (!assistantMessage) throw new Error("Gemini returned an empty response.");
+
         if (params.config?.responseMimeType === "application/json") {
-          payload.response_format = { type: "json_object" };
+          assistantMessage = cleanJSONString(assistantMessage);
         }
-        const response = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(`NVIDIA API returned ${response.status}: ${errorText}`);
-        }
-        const responseData = await response.json();
-        let assistantMessage = responseData.choices?.[0]?.message?.content || "";
-        if (payload.response_format) assistantMessage = cleanJSONString(assistantMessage);
         return { text: assistantMessage };
       } catch (error: any) {
         attempt++;
-        console.error(`[NVIDIA API Error] Model: ${currentModel}, Attempt: ${attempt}, Error: ${error.message}`);
+        console.error(`[Gemini Error] Model: ${currentModel}, Attempt: ${attempt}, Error: ${error.message}`);
         if (attempt > maxRetries) break;
         await new Promise((r) => setTimeout(r, 1000 * attempt));
       }
