@@ -181,9 +181,26 @@ function cleanJSONString(str: string): string {
   return cleaned.trim();
 }
 
-// Per-request cap. The previous NVIDIA implementation had no timeout, so a
-// stalled connection hung the whole upload indefinitely.
-const GEMINI_TIMEOUT_MS = 60000;
+// Per-attempt cap. The original NVIDIA implementation had no timeout at all,
+// so a stalled connection hung the whole upload indefinitely.
+const GEMINI_TIMEOUT_MS = 25000;
+
+// Ceiling for the entire retry/fallback sequence, so a bad run degrades to a
+// clean error instead of burning past the serverless function limit.
+const GEMINI_TOTAL_BUDGET_MS = 55000;
+
+// Verified callable on this API key. gemini-2.5-flash / -lite are NOT usable
+// here -- they return 404 "no longer available to new users" -- so they must
+// never appear in this chain.
+const GEMINI_FALLBACK_MODELS = ["gemini-3.6-flash", "gemini-flash-latest"];
+
+// A model that is missing, retired, or rejected will fail identically forever.
+// Retrying it wastes the budget that a working fallback needs.
+function isPermanentModelError(message: string): boolean {
+  return /NOT_FOUND|no longer available|INVALID_ARGUMENT|PERMISSION_DENIED|API key not valid|"code":\s*40[0134]/i.test(
+    message
+  );
+}
 
 // Helper to call the Gemini API with retry and fallback models.
 // `params` is already Gemini-native ({ model, contents, config }), so contents
@@ -193,15 +210,26 @@ async function generateContentWithRetry(ai: any, params: any, maxRetries = 2): P
     throw new Error("GEMINI_API_KEY environment variable is required.");
   }
 
-  // Caller's model first, then a stable fallback if it is unavailable/overloaded.
-  const requestedModel = params.model || "gemini-3.5-flash";
-  const modelsToTry = [requestedModel, "gemini-2.5-flash"].filter(
+  // Caller's model first, then known-good fallbacks if it is overloaded.
+  const requestedModel = params.model || GEMINI_FALLBACK_MODELS[0];
+  const modelsToTry = [requestedModel, ...GEMINI_FALLBACK_MODELS].filter(
     (m, i, arr) => arr.indexOf(m) === i
   );
+
+  const deadline = Date.now() + GEMINI_TOTAL_BUDGET_MS;
+  let lastError = "";
 
   for (const currentModel of modelsToTry) {
     let attempt = 0;
     while (attempt <= maxRetries) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        console.warn(`[Gemini] Total time budget exhausted; giving up.`);
+        throw new Error(
+          "The clinical analysis models are currently experiencing high demand. Please try again in a few seconds."
+        );
+      }
+
       try {
         console.log(`[Gemini] Generating with model: ${currentModel} (Attempt ${attempt + 1}/${maxRetries + 1})`);
 
@@ -215,7 +243,7 @@ async function generateContentWithRetry(ai: any, params: any, maxRetries = 2): P
               ...(params.config || {}),
             },
           }),
-          GEMINI_TIMEOUT_MS
+          Math.min(GEMINI_TIMEOUT_MS, remaining)
         );
 
         let assistantMessage = response?.text || "";
@@ -239,7 +267,14 @@ async function generateContentWithRetry(ai: any, params: any, maxRetries = 2): P
       } catch (error: any) {
         attempt++;
         const errorMessage = error.message || String(error);
+        lastError = errorMessage;
         console.error(`[Gemini Error] Model: ${currentModel}, Attempt: ${attempt}, Error: ${errorMessage}`);
+
+        // Retrying a retired/rejected model can never succeed — skip it now.
+        if (isPermanentModelError(errorMessage)) {
+          console.warn(`[Gemini] ${currentModel} is permanently unavailable; moving to next model.`);
+          break;
+        }
 
         if (attempt > maxRetries) {
           console.warn(`[Gemini] Max retries reached for model ${currentModel}.`);
@@ -253,6 +288,7 @@ async function generateContentWithRetry(ai: any, params: any, maxRetries = 2): P
     }
   }
 
+  console.error(`[Gemini] All models exhausted. Last error: ${lastError}`);
   throw new Error("The clinical analysis models are currently experiencing high demand. Please try again in a few seconds.");
 }
 
@@ -354,7 +390,7 @@ async function startServer() {
 Return everything formatted as a validated JSON object.`;
 
       const geminiResponse = await generateContentWithRetry(ai, {
-        model: "gemini-3.5-flash",
+        model: "gemini-3.6-flash",
         contents,
         config: {
           systemInstruction: systemPrompt,
@@ -629,7 +665,7 @@ Return everything formatted as a validated JSON object.`;
           ).join("\n");
 
           const aiResp = await generateContentWithRetry(ai, {
-            model: "gemini-3.5-flash",
+            model: "gemini-3.6-flash",
             contents: [
               {
                 role: "user",
