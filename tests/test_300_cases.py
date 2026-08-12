@@ -35,10 +35,10 @@ def test_pregnancy_case(case, driver):
     assert "PreCare" in driver.page_source
 
     print(
-        f"Testing {case["case_id"]}: "
-        f"Age={case["age"]}, "
-        f"GestationalAge={case["gestational_age"]}, "
-        f"Hb={case["hemoglobin"]}, "
-        f"BP={case["systolic"]}/{case["diastolic"]}, "
-        f"FHR={case["fetal_heart_rate"]}"
+        f"Testing {case['case_id']}: "
+        f"Age={case['age']}, "
+        f"GestationalAge={case['gestational_age']}, "
+        f"Hb={case['hemoglobin']}, "
+        f"BP={case['systolic']}/{case['diastolic']}, "
+        f"FHR={case['fetal_heart_rate']}"
     )
