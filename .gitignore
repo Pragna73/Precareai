@@ -9,3 +9,15 @@ coverage/
 # Runtime patient data — generated report records and uploaded medical
 # documents. Must never be committed.
 data/
+
+# Python virtual environment and cache
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Selenium test reports
+reports/
+
+# Local Selenium test artifacts
+collected_tests.txt
