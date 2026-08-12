@@ -27,4 +27,8 @@ export interface Doctor {
   mapsUrl: string;
   aiRecommended?: boolean;
   aiReason?: string;
+  distance_km?: number;
+  lat?: number;
+  lon?: number;
+  isClosest?: boolean;
 }

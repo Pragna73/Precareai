@@ -12,11 +12,11 @@ export default function RiskBadge({ id = "risk-badge", level }: RiskBadgeProps) 
   let dotColor = "bg-green-500";
   let text = "Low Risk";
 
-  if (normalizedLevel === "MEDIUM") {
+  if (normalizedLevel === "MEDIUM" || normalizedLevel === "MODERATE" || normalizedLevel === "WARNING") {
     styles = "bg-amber-100 text-amber-800 border-amber-200";
     dotColor = "bg-amber-500";
     text = "Medium Risk";
-  } else if (normalizedLevel === "HIGH") {
+  } else if (normalizedLevel === "HIGH" || normalizedLevel === "DANGER" || normalizedLevel === "CRITICAL") {
     styles = "bg-red-100 text-red-800 border-red-200";
     dotColor = "bg-red-500";
     text = "High Risk";

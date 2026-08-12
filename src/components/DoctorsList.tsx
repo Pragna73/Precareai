@@ -6,9 +6,11 @@ import { Doctor } from "../types";
 interface DoctorsListProps {
   doctors: Doctor[];
   location: string;
+  selectedDoctor?: Doctor | null;
+  onSelectDoctor?: (doctor: Doctor) => void;
 }
 
-export default function DoctorsList({ doctors, location }: DoctorsListProps) {
+export default function DoctorsList({ doctors, location, selectedDoctor, onSelectDoctor }: DoctorsListProps) {
   if (!doctors || doctors.length === 0) {
     return (
       <div className="text-center py-10 px-4 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
@@ -22,7 +24,13 @@ export default function DoctorsList({ doctors, location }: DoctorsListProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       {doctors.map((doctor, index) => (
-        <DoctorCard key={index} id={`doctor-${index}`} doctor={doctor} />
+        <DoctorCard
+          key={index}
+          id={`doctor-${index}`}
+          doctor={doctor}
+          isSelected={selectedDoctor?.name === doctor.name}
+          onSelect={onSelectDoctor}
+        />
       ))}
     </div>
   );

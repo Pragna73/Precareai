@@ -26,18 +26,23 @@ export default function IndicatorsTable({ indicators }: IndicatorsTableProps) {
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {indicators.map((indicator, index) => {
-            const isAbnormal = indicator.status === "abnormal";
+          {indicators.map((item, index) => {
+            if (!item) return null;
+            const parameter = typeof item === "string" ? item : (item.parameter || "Biomarker Parameter");
+            const value = typeof item === "string" ? "Extracted" : (item.value || "Normal");
+            const statusStr = typeof item === "object" && item.status ? String(item.status).toLowerCase() : "normal";
+            const isAbnormal = statusStr === "abnormal" || statusStr === "high" || statusStr === "attention" || statusStr === "danger";
+
             return (
               <tr key={index} className="hover:bg-gray-50/50 transition-colors">
                 <td className="px-6 py-4">
                   <span className="font-medium text-gray-800 text-sm md:text-base">
-                    {indicator.parameter}
+                    {parameter}
                   </span>
                 </td>
                 <td className="px-6 py-4">
                   <span className={`font-mono text-sm md:text-base ${isAbnormal ? "text-amber-700 font-semibold" : "text-gray-600"}`}>
-                    {indicator.value}
+                    {value}
                   </span>
                 </td>
                 <td className="px-6 py-4 text-right">

@@ -31,11 +31,24 @@ export default function FileUpload({ onFileSelect, selectedFile }: FileUploadPro
       "application/msword"
     ];
     const isDocxOrDoc = file.name.endsWith(".docx") || file.name.endsWith(".doc");
-    if (validTypes.includes(file.type) || isDocxOrDoc) {
-      onFileSelect(file);
-    } else {
-      alert("Invalid file type. Please upload a PDF, DOCX, PNG, or JPG pregnancy report.");
+    if (!validTypes.includes(file.type) && !isDocxOrDoc) {
+      alert("Invalid file format. Please upload a PDF, DOCX, PNG, or JPG pregnancy report.");
+      return;
     }
+
+    const lowerName = file.name.toLowerCase();
+    const disallowedNames = [
+      "invoice", "receipt", "resume", "cv", "passport", "license",
+      "vehicle", "tax", "bill", "payslip", "ticket", "contract",
+      "homework", "assignment", "statement", "salary", "certificate"
+    ];
+
+    if (disallowedNames.some(kw => lowerName.includes(kw))) {
+      alert("Invalid Document: The selected file does not appear to be a pregnancy medical report. Please upload an obstetric lab report, prenatal blood test, or ultrasound scan.");
+      return;
+    }
+
+    onFileSelect(file);
   };
 
   const handleDrop = (e: React.DragEvent) => {
